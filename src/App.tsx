@@ -1,11 +1,10 @@
-import {Suspense, lazy} from "react";
-import {BrowserRouter, Routes, Route} from "react-router-dom";
+import { Suspense, lazy } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./App.css";
 
 // Lazy load components
-const Home = lazy(() => import("./pages/./Login"));
-const About = lazy(() => import("./pages/About"));
-const Settings = lazy(() => import("./pages/Settings"));
+const Login = lazy(() => import("./pages/./Login"));
+
 
 // Loading fallback component
 function LoadingFallback() {
@@ -21,9 +20,9 @@ function App() {
         <BrowserRouter>
             <Suspense fallback={<LoadingFallback />}>
                 <Routes>
-                    <Route path="/" element={<Home />} />
-                    <Route path="/about" element={<About />} />
-                    <Route path="/settings" element={<Settings />} />
+                    <Route path="/" element={<Navigate to="/login" replace />} />
+                    <Route path="/login" element={<Login />} />
+                    {/* <Route path="/user/:user_id" element={<Home />} /> */}
                 </Routes>
             </Suspense>
         </BrowserRouter>
