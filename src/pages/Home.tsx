@@ -1,7 +1,5 @@
 import { useState, useRef } from "react";
-import reactLogo from "../assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
-import "../App.css";
 
 function Home() {
   const [greetMsg, setGreetMsg] = useState("");
@@ -13,37 +11,28 @@ function Home() {
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+    <main className="h-screen container">
+        <div className="flex flex-col items-center justify-center">
+            <div className="">
+                <h1 className="font-bold text-5xl py-10">LOGIN</h1>
+            </div>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank" rel="noreferrer">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank" rel="noreferrer">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank" rel="noreferrer">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          ref={nameInputRef}
-          id="greet-input"
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+            <form
+                className="row"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    greet();
+                }}
+            >
+                <input
+                    ref={nameInputRef}
+                    id="greet-input"
+                    placeholder="Enter a token"
+                />
+                <button type="submit">Login</button>
+            </form>
+            <p>{greetMsg}</p>
+        </div>
     </main>
   );
 }
