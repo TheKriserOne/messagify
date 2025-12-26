@@ -11,11 +11,11 @@ function Login() {
     }
 
     return (
-        <main className="bg-slate-900 h-screen w-screen flex justify-center items-center">
+        <main className="bg-slate-900 h-screen w-screen flex justify-center items-center max-w-screen-xl">
             <div className="">
                 <h1 className="font-bold text-5xl pb-5 text-indigo-500">Connect Discord</h1>
                 <form
-                    className="bg-gray-700 rounded-3xl p-2 flex justify-center items-center space-x-4"
+                    className="bg-gray-700 rounded-3xl p-2 flex justify-center items-center space-x-4 outline-gray-500 outline-1"
                     onSubmit={(e) => {
                         e.preventDefault();
                         greet();
@@ -32,7 +32,7 @@ function Login() {
                             text-gray-200"> Confirm
                     </button>
                 </form>
-                <p>{greetMsg}</p>
+                <h3 className="absolute text-green-500 py-4">{greetMsg}</h3>
             </div>
         </main>
     );
