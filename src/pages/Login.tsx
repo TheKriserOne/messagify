@@ -13,14 +13,11 @@ function Login() {
     }
 
     return (
-        <main className="h-screen container">
-            <div className="flex flex-col items-center justify-center">
-                <div className="">
-                    <h1 className="font-bold text-5xl py-10">LOGIN</h1>
-                </div>
-
+        <main className="bg-slate-900 h-screen w-screen flex justify-center items-center max-w-screen-xl">
+            <div className="">
+                <h1 className="font-bold text-5xl pb-5 text-indigo-500">Connect Discord</h1>
                 <form
-                    className="row"
+                    className="bg-gray-700 rounded-3xl p-2 flex justify-center items-center space-x-4 outline-gray-500 outline-1"
                     onSubmit={(e) => {
                         e.preventDefault();
                         submit(e);
@@ -28,10 +25,14 @@ function Login() {
                 >
                     <input
                         ref={nameInputRef}
+                        className="text-gray-200 px-5 p-2 focus:outline-none rounded-xl"
                         id="greet-input"
                         placeholder="Enter a token"
                     />
-                    <button type="submit">Login</button>
+                    <button type="submit"
+                            className="font-bold px-8 py-4 bg-indigo-500 rounded-2xl
+                            text-gray-200"> Confirm
+                    </button>
                 </form>
             </div>
         </main>
