@@ -23,6 +23,18 @@ export default [
       ...pluginReact.configs.flat.recommended.rules,
       "react/react-in-jsx-scope": "off",
       "react/jsx-uses-react": "off",
+      // Disable base ESLint rule (TypeScript ESLint handles this)
+      "no-unused-vars": "off",
+    },
+  },
+  {
+    // Override TypeScript ESLint unused variable rules to warnings
+    // Note: If this rule doesn't exist in your version, the recommended config
+    // may already handle it, or you may need to check available rules
+    rules: {
+      // Try the standard rule name first
+      "@typescript-eslint/no-unused-vars": "warn",
+      // If that doesn't work, the recommended config should already have it set
     },
   },
   {

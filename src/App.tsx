@@ -1,10 +1,9 @@
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import "./App.css";
 
 // Lazy load components
 const Login = lazy(() => import("./pages/./Login"));
-
+const DiscordLayout = lazy(() => import("./layout/Discord/DiscordLayout"));
 
 // Loading fallback component
 function LoadingFallback() {
@@ -22,6 +21,7 @@ function App() {
                 <Routes>
                     <Route path="/" element={<Navigate to="/login" replace />} />
                     <Route path="/login" element={<Login />} />
+                    <Route path="/user" element={<DiscordLayout/>} />
                     {/* <Route path="/user/:user_id" element={<Home />} /> */}
                 </Routes>
             </Suspense>

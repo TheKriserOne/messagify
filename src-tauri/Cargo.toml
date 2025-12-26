@@ -20,7 +20,16 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.147"
 reqwest = { version = "0.12.28", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+codegen-units = 1       # Better optimization (slower compile)
+lto = true              # Link-time optimization
+opt-level = "s"         # Optimize for size ("3" for speed)
+panic = "abort"         # Smaller binary, no unwinding
+strip = true            # Remove debug symbols
 
