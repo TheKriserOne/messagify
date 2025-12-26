@@ -1,9 +1,9 @@
-import { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import {Suspense, lazy} from "react";
+import {BrowserRouter, Routes, Route} from "react-router-dom";
 import "./App.css";
 
 // Lazy load components
-const Home = lazy(() => import("./pages/Home"));
+const Home = lazy(() => import("./pages/./Login"));
 const About = lazy(() => import("./pages/About"));
 const Settings = lazy(() => import("./pages/Settings"));
 

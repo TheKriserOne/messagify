@@ -1,13 +1,13 @@
-import { useState, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import {useState, useRef} from "react";
+import {invoke} from "@tauri-apps/api/core";
 
-function Home() {
+function Login() {
     const [greetMsg, setGreetMsg] = useState("");
     const nameInputRef = useRef<HTMLInputElement>(null);
 
     async function greet() {
         const name = nameInputRef.current?.value || "";
-        setGreetMsg(await invoke("greet", { name }));
+        setGreetMsg(await invoke("greet", {name}));
     }
 
     return (
@@ -37,4 +37,4 @@ function Home() {
     );
 }
 
-export default Home;
+export default Login;
