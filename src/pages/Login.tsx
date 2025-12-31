@@ -1,8 +1,11 @@
 import { useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 
 function Login() {
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const token = nameInputRef.current?.value || "";
@@ -10,9 +13,14 @@ function Login() {
       return;
     }
     try {
-      const response = await invoke<string>("set_token", { token });
-      const userData = JSON.parse(response);
-    } catch {
+      const success = await invoke<boolean>("set_token", {
+        token: token,
+      });
+      if (success) {
+        navigate("/discord/user");
+      }
+    } catch (e) {
+      console.error(e);
       return;
     }
   }
@@ -20,7 +28,7 @@ function Login() {
   return (
     <main className="bg-slate-900 h-screen w-screen flex justify-center items-center">
       <div>
-        <h1 className="font-bold text-5xl pb-5 text-indigo-500">
+        <h1 className="font-bold text-5xl text-center pb-5 text-indigo-500">
           Connect Discord
         </h1>
         <form

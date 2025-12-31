@@ -1,5 +1,5 @@
 import Guild from "../../components/Discord/GuildBar";
-import Channel from "../../components/Discord/ChannelBar";
+import ChannelBarController from "../../components/Discord/ChannelBar/ChannelBarController";
 import Chat from "../../components/Discord/MainChat";
 import MembersBar from "../../components/Discord/Members";
 
@@ -10,13 +10,13 @@ function DiscordLayout() {
       <Guild />
 
       {/* Channels Sidebar */}
-      <Channel />
+      <ChannelBarController />
 
       {/* Main Chat Area */}
       <Chat />
 
       {/* Members Sidebar */}
-      <MembersBar/>
+      <MembersBar />
     </div>
   );
 }
