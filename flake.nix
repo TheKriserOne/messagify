@@ -27,19 +27,27 @@
 
 				  cargo-expand
 
+				  nodejs_24
+
 				  alsa-lib
 				  libopus
 
-				  fontconfig
+					at-spi2-atk
+    				atkmm
+    				cairo
+    				gdk-pixbuf
+    				glib
+    				gtk3
+    				harfbuzz
+    				librsvg
+    				libsoup_3
+    				pango
+    				webkitgtk_4_1
+    				openssl
 
-				  openssl
 				  pkg-config
     		    ];
-				LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-					pkgs.libxkbcommon
-					pkgs.wayland
-					pkgs.vulkan-loader
-				];
+
 
     		    # RUST_BACKTRACE = "full";
 				
