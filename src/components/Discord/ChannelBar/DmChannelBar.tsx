@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DmChannel } from "../../../types/discord";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 const DmChannelBar = () => {
   const [channels, setChannels] = useState<DmChannel[]>([]);
+  const { userChannelId } = useParams();
   const navigate = useNavigate();
   useEffect(() => {
     invoke<string>("fetch_user_channels")
@@ -49,11 +50,20 @@ const DmChannelBar = () => {
                   nameFromRecipients.trim() ||
                   "Unknown DM";
 
+                const isSelected = userChannelId === channel.id;
+
                 return (
                   <div
                     key={channel.id}
-                    className="px-2 py-1 rounded cursor-pointer flex items-center text-gray-300 hover:bg-gray-700/50"
-                    onClick={() => navigate(`/discord/user/${channel.id}`)}
+                    className={[
+                      "px-2 py-1 rounded cursor-pointer flex items-center",
+                      isSelected
+                        ? "bg-gray-700 text-white"
+                        : "hover:bg-gray-700/50 text-gray-300",
+                    ].join(" ")}
+                    onClick={() => {
+                      navigate(`/discord/user/${channel.id}`);
+                    }}
                   >
                     <span className="mr-2 text-gray-400">@</span>
                     <span className="text-sm font-medium">{label}</span>

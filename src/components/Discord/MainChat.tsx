@@ -9,6 +9,7 @@ type MainChatProps = {
 
 const Chat = ({ channelTitle, messages, loading, error }: MainChatProps) => {
   const list = messages ?? [];
+  console.log("list " + list);
   return (
     <div className="flex-1 flex flex-col">
       {/* Channel Header */}

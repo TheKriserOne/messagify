@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useMessageStore } from "../stores/messageStore";
-import type { DiscordMessage } from "../types/discord";
+import type { DiscordMessage, DiscordUserLite } from "../types/discord";
 
 // Gateway event types matching Rust GatewayEvent enum
 interface GatewayEventPayload {
@@ -14,20 +14,6 @@ interface GatewayEventPayload {
     | "Connected"
     | "Disconnected";
   data?: unknown;
-}
-
-interface MessageCreateData {
-  id: string;
-  channel_id: string;
-  content: string;
-  timestamp: string;
-  edited_timestamp?: string | null;
-  author: {
-    id: string;
-    username: string;
-    global_name?: string | null;
-    avatar?: string | null;
-  };
 }
 
 interface MessageUpdateData {
@@ -50,7 +36,7 @@ export function useDiscordEvents() {
   const addMessage = useMessageStore((state) => state.addMessage);
   const updateMessage = useMessageStore((state) => state.updateMessage);
   const deleteMessage = useMessageStore((state) => state.deleteMessage);
-
+  
   // Prevent duplicate listeners in StrictMode
   const listenerRef = useRef<UnlistenFn | null>(null);
   const isListeningRef = useRef(false);
@@ -66,12 +52,13 @@ export function useDiscordEvents() {
         "discord-gateway",
         (event) => {
           const payload = event.payload;
-
           switch (payload.type) {
             case "MessageCreate": {
-              const data = payload.data as MessageCreateData;
+              console.log(payload.data);
+              const data = payload.data as DiscordMessage;
               const message: DiscordMessage = {
                 id: data.id,
+                channel_id: data.channel_id,
                 content: data.content,
                 timestamp: data.timestamp,
                 edited_timestamp: data.edited_timestamp,

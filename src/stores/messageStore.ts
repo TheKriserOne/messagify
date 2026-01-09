@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import type { DiscordMessage } from "../types/discord";
 
+type channel_id = String;
 interface MessageState {
+
   // Map of channelId -> messages array
-  messages: Map<string, DiscordMessage[]>;
+  messages: Map<channel_id, DiscordMessage[]>;
 
   // Set all messages for a channel (used for initial fetch)
   setMessages: (channelId: string, messages: DiscordMessage[]) => void;
@@ -21,9 +23,6 @@ interface MessageState {
   // Delete a message
   deleteMessage: (channelId: string, messageId: string) => void;
 
-  // Get messages for a channel
-  getMessages: (channelId: string) => DiscordMessage[];
-
   // Clear messages for a channel
   clearChannel: (channelId: string) => void;
 
@@ -37,21 +36,35 @@ export const useMessageStore = create<MessageState>((set, get) => ({
   setMessages: (channelId, messages) =>
     set((state) => {
       const newMessages = new Map(state.messages);
-      newMessages.set(channelId, messages);
+      const existingMessages = newMessages.get(channelId) ?? [];
+      
+      // Create a Map for O(1) lookup of existing messages by ID
+      const existingIds = new Set(existingMessages.map(m => m.id));
+      
+      // Filter out messages that already exist, then merge
+      const newUniqueMessages = messages.filter(m => !existingIds.has(m.id));
+      const merged = [...existingMessages, ...newUniqueMessages];
+      
+      // Sort by timestamp to maintain chronological order
+      newMessages.set(channelId, merged);
       return { messages: newMessages };
     }),
 
   addMessage: (channelId, message) =>
     set((state) => {
-      const newMessages = new Map(state.messages);
-      const channelMessages = newMessages.get(channelId) ?? [];
-
-      // Add new message at the beginning (newest first - matches Discord API order)
-      // Check if message already exists to avoid duplicates
-      if (!channelMessages.some((m) => m.id === message.id)) {
-        newMessages.set(channelId, [message, ...channelMessages]);
+      const newMessages = state.messages;
+      // Get existing messages or create new array if channel doesn't exist
+      const channelMessages = newMessages.get(channelId);
+      if (channelMessages) {
+        // Channel exists - insert new message if not duplicate
+        if (!channelMessages.some((m) => m.id === message.id)) {
+          newMessages.set(channelId, [message, ...channelMessages]);
+        }
+      } else {
+        // Channel doesn't exist - create new entry with the message
+        newMessages.set(channelId, [message]);
       }
-
+      console.log(message);
       return { messages: newMessages };
     }),
 
@@ -84,9 +97,6 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
       return { messages: newMessages };
     }),
-
-  getMessages: (channelId) => get().messages.get(channelId) ?? [],
-
   clearChannel: (channelId) =>
     set((state) => {
       const newMessages = new Map(state.messages);

@@ -94,6 +94,7 @@ export interface DmChannel {
 
 // Discord messages returned from GET /channels/{channel.id}/messages
 export interface DiscordMessage {
+  channel_id: string;
   id: string;
   content: string;
   timestamp: string;

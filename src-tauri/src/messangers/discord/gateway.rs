@@ -175,7 +175,7 @@ async fn run_gateway(
                 "browser": "messagify",
                 "device": "messagify"
             },
-            "intents": 33281 // GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
+            "intents": 1 << 12 | 1 << 9 | 1 << 15 // GUILDS | DIRECT_MESSAGES | MESSAGE_CONTENT
         }
     });
 
@@ -220,7 +220,7 @@ async fn run_gateway(
     loop {
         tokio::select! {
             // Check for shutdown signal
-            _ = shutdown_rx.recv() => {
+            Some(_) = shutdown_rx.recv() => {
                 info!("Gateway shutdown requested");
                 let _ = write.send(Message::Close(None)).await;
                 break;
@@ -284,7 +284,6 @@ async fn handle_message(
 ) -> Result<(), String> {
     let payload: GatewayPayload =
         serde_json::from_str(text).map_err(|e| format!("Failed to parse payload: {}", e))?;
-
     // Update sequence number
     if let Some(s) = payload.s {
         *last_sequence = Some(s);
@@ -293,6 +292,7 @@ async fn handle_message(
     match payload.op {
         OP_DISPATCH => {
             if let (Some(event_type), Some(data)) = (payload.t.as_deref(), payload.d) {
+                
                 handle_dispatch_event(event_type, data, app_handle).await?;
             }
         }
@@ -334,7 +334,7 @@ async fn handle_dispatch_event(
             debug!("MESSAGE_CREATE: channel_id={}", data["channel_id"]);
             Some(GatewayEvent::MessageCreate(data))
         }
-        "MESSAGE_UPDATE" => {
+        "MESSAGE_UPDATE" => { 
             debug!("MESSAGE_UPDATE: message_id={}", data["id"]);
             Some(GatewayEvent::MessageUpdate(data))
         }

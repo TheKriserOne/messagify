@@ -114,6 +114,7 @@ pub async fn fetch_channel_messages(
     state: State<'_, AppState>,
     channel_id: String,
     limit: Option<u32>,
+    before: Option<String>,
 ) -> Result<String, String> {
     let token = state
         .token
@@ -126,8 +127,18 @@ pub async fn fetch_channel_messages(
         "https://discord.com/api/v10/channels/{}/messages",
         channel_id
     );
+    
+    // Build query parameters
+    let mut query_params = Vec::new();
     if let Some(limit) = limit {
-        url = format!("{}?limit={}", url, limit);
+        query_params.push(format!("limit={}", limit));
+    }
+    if let Some(before) = before {
+        query_params.push(format!("before={}", before));
+    }
+    
+    if !query_params.is_empty() {
+        url = format!("{}?{}", url, query_params.join("&"));
     }
 
     let response = reqwest::Client::new()
