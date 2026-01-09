@@ -175,7 +175,7 @@ async fn run_gateway(
                 "browser": "messagify",
                 "device": "messagify"
             },
-            "intents": 1 << 12 | 1 << 9 | 1 << 15 // GUILDS | DIRECT_MESSAGES | MESSAGE_CONTENT
+            "intents": 1 << 12 | 1 << 9 | 1 << 15 // GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
         }
     });
 
@@ -220,6 +220,7 @@ async fn run_gateway(
     loop {
         tokio::select! {
             // Check for shutdown signal
+            
             Some(_) = shutdown_rx.recv() => {
                 info!("Gateway shutdown requested");
                 let _ = write.send(Message::Close(None)).await;
