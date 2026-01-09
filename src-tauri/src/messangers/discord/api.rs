@@ -162,3 +162,48 @@ pub async fn fetch_channel_messages(
     })
 }
 
+#[tauri::command]
+pub async fn send_message(
+    state: State<'_, AppState>,
+    channel_id: String,
+    content: String,
+) -> Result<String, String> {
+    let token = state
+        .token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "not_authenticated".to_string())?;
+
+    let url = format!(
+        "https://discord.com/api/v10/channels/{}/messages",
+        channel_id
+    );
+
+    let payload = serde_json::json!({
+        "content": content
+    });
+
+    let response = reqwest::Client::new()
+        .post(&url)
+        .header("Authorization", &token)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Request failed: {}", e);
+            "request_failed".to_string()
+        })?;
+
+    if !response.status().is_success() {
+        error!("Send message failed: {}", response.status());
+        return Err(format!("http_{}", response.status().as_u16()));
+    }
+
+    response.text().await.map_err(|e| {
+        error!("Failed to parse send message response: {}", e);
+        "parse_failed".to_string()
+    })
+}
+

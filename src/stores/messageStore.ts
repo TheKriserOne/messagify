@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { DiscordMessage } from "../types/discord";
 
-type channel_id = String;
+type channel_id = string;
 interface MessageState {
 
   // Map of channelId -> messages array
@@ -52,7 +52,7 @@ export const useMessageStore = create<MessageState>((set, get) => ({
 
   addMessage: (channelId, message) =>
     set((state) => {
-      const newMessages = state.messages;
+      const newMessages = new Map(state.messages);
       // Get existing messages or create new array if channel doesn't exist
       const channelMessages = newMessages.get(channelId);
       if (channelMessages) {

@@ -7,7 +7,7 @@ use crate::messangers::{
     discord::{
         api::{
             check_discord_token, fetch_channel_messages, fetch_guild_channels, fetch_user_channels,
-            fetch_user_guilds,
+            fetch_user_guilds, send_message,
         },
         gateway::GatewayClient,
     },
@@ -172,7 +172,8 @@ pub fn run() {
             fetch_user_guilds,
             fetch_guild_channels,
             fetch_user_channels,
-            fetch_channel_messages
+            fetch_channel_messages,
+            send_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

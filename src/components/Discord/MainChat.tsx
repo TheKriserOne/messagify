@@ -1,15 +1,76 @@
+import { useState, useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { DiscordMessage } from "../../types/discord";
+import { useMessageStore } from "../../stores/messageStore";
 
 type MainChatProps = {
+  channelId?: string;
   channelTitle?: string;
   messages?: DiscordMessage[];
   loading?: boolean;
   error?: string | null;
 };
 
-const Chat = ({ channelTitle, messages, loading, error }: MainChatProps) => {
+const Chat = ({
+  channelId,
+  channelTitle,
+  messages,
+  loading,
+  error,
+}: MainChatProps) => {
   const list = messages ?? [];
-  console.log("list " + list);
+  const [messageInput, setMessageInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const addMessage = useMessageStore((state) => state.addMessage);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+      inputRef.current.style.height = `${inputRef.current.scrollHeight}px`;
+    }
+  }, [messageInput]);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!channelId || !messageInput.trim() || sending) return;
+
+    const content = messageInput.trim();
+    setMessageInput("");
+    setSending(true);
+
+    try {
+      const json = await invoke<string>("send_message", {
+        channelId: channelId,
+        content: content,
+      });
+      const sentMessage = JSON.parse(json) as DiscordMessage;
+      // Add the sent message to the store immediately
+      addMessage(channelId, sentMessage);
+    } catch (e) {
+      console.error("Failed to send message:", e);
+      // Restore the message input on error
+      setMessageInput(content);
+    } finally {
+      setSending(false);
+      // Reset textarea height
+      if (inputRef.current) {
+        inputRef.current.style.height = "auto";
+      }
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const form = e.currentTarget.form;
+      if (form) {
+        form.requestSubmit();
+      }
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col">
       {/* Channel Header */}
@@ -65,6 +126,33 @@ const Chat = ({ channelTitle, messages, loading, error }: MainChatProps) => {
           })
         )}
       </div>
+
+      {/* Message Input */}
+      {channelId && (
+        <div className="border-t border-gray-900 px-4 py-3">
+          <form onSubmit={handleSubmit} className="flex items-end gap-2">
+            <div className="flex-1 relative">
+              <textarea
+                ref={inputRef}
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={`Message #${channelTitle ?? "channel"}`}
+                disabled={sending}
+                rows={1}
+                className="w-full bg-gray-700 text-white placeholder-gray-400 rounded-lg px-4 py-2 pr-12 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed max-h-48 overflow-y-auto"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={!messageInput.trim() || sending}
+              className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+            >
+              {sending ? "Sending..." : "Send"}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

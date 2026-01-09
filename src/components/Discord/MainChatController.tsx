@@ -41,6 +41,7 @@ export default function ChatController() {
   }, [targetId]);
   return (
     <Chat
+      channelId={targetId}
       channelTitle={targetId ?? "Select a channel"}
       messages={messages}
       loading={loading}
