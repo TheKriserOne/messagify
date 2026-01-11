@@ -29,7 +29,7 @@
 
 				  nodejs_24
 
-				  alsa-lib
+				#   alsa-lib
 				  libopus
 
 					at-spi2-atk
@@ -42,7 +42,7 @@
     				librsvg
     				libsoup_3
     				pango
-    				webkitgtk_4_1
+    				# webkitgtk_4_1
     				openssl
 
 				  pkg-config

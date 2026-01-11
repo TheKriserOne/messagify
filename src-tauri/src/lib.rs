@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tracing::{error, info, instrument};
@@ -9,7 +11,7 @@ use crate::messangers::{
             check_discord_token, fetch_channel_messages, fetch_guild_channels, fetch_user_channels,
             fetch_user_guilds, send_message,
         },
-        gateway::GatewayClient,
+        gateway::{self, GatewayClient, voice_init},
     },
     token_storage,
 };
@@ -19,6 +21,7 @@ mod messangers;
 pub struct AppState {
     token: Mutex<Option<String>>,
     gateway: Mutex<GatewayClient>,
+    neck: Vec<String>
 }
 
 #[instrument]
@@ -122,6 +125,7 @@ async fn get_token(state: State<'_, AppState>) -> Result<String, ()> {
     }
 }
 
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -141,15 +145,15 @@ pub fn run() {
             let token = tauri::async_runtime::block_on(load_validate_and_persist_token());
 
             // Initialize Gateway client
-            let gateway = GatewayClient::new();
-
+            let gateway = Mutex::new(GatewayClient::new());
+            
             // Auto-start Gateway if token exists
             if let Some(ref tok) = token {
                 let tok = tok.clone();
                 let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut gw = GatewayClient::new();
-                    if let Err(e) = gw.connect(tok, app_handle).await {
+                let gateway = &gateway;
+                tauri::async_runtime::block_on(async move {  
+                    if let Err(e) = gateway.lock().await.connect(tok, app_handle).await {
                         error!("Failed to auto-start Gateway: {}", e);
                     }
                 });
@@ -158,7 +162,8 @@ pub fn run() {
             // Store state
             app.manage(AppState {
                 token: Mutex::new(token),
-                gateway: Mutex::new(gateway),
+                gateway: gateway,
+                neck: vec![String::new(), String::new()]
             });
             Ok(())
         })
@@ -173,7 +178,8 @@ pub fn run() {
             fetch_guild_channels,
             fetch_user_channels,
             fetch_channel_messages,
-            send_message
+            send_message,
+            voice_init
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

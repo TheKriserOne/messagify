@@ -9,7 +9,10 @@ const GuildChannelBar = () => {
     if (channelId === chosenchannelId) return;
     navigate(`/discord/guild/${guildId}/${chosenchannelId}`);
   }
-
+  
+  function connectVoice(channelId: string, guildId: string) {
+    invoke<string>("voice_init" , {guildId, channelId});
+  }
   const [channels, setChannels] = useState<Channel[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set()
@@ -57,7 +60,7 @@ const GuildChannelBar = () => {
   }
 
   // Sort channels within each category by position
- 
+
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories((prev) => {
@@ -103,7 +106,14 @@ const GuildChannelBar = () => {
             ? "bg-gray-700 text-white"
             : "hover:bg-gray-700/50 text-gray-300",
         ].join(" ")}
-        onClick={() => openChannel(channel.id)}
+        onClick={() => {
+          if (channel.type === ChannelType.GUILD_TEXT) {
+            openChannel(channel.id)
+          }
+          else if (channel.type === ChannelType.GUILD_VOICE){
+            connectVoice(channel.id, guildId as string);
+          }
+        }}
       >
         {getChannelIcon(channel)}
         <span className="font-medium text-gray-300">{channel.name}</span>
@@ -126,9 +136,8 @@ const GuildChannelBar = () => {
         >
           {/* Chevron icon */}
           <svg
-            className={`w-3 h-3 mr-1 text-gray-400 transition-transform ${
-              isExpanded ? "rotate-90" : ""
-            }`}
+            className={`w-3 h-3 mr-1 text-gray-400 transition-transform ${isExpanded ? "rotate-90" : ""
+              }`}
             fill="currentColor"
             viewBox="0 0 20 20"
           >
