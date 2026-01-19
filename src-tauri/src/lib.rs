@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tracing::{error, info, instrument};
@@ -11,7 +9,7 @@ use crate::messangers::{
             check_discord_token, fetch_channel_messages, fetch_guild_channels, fetch_user_channels,
             fetch_user_guilds, send_message,
         },
-        gateway::{self, GatewayClient, voice_init},
+        gateway::{GatewayClient, voice_init},
     },
     token_storage,
 };
@@ -20,8 +18,7 @@ mod messangers;
 
 pub struct AppState {
     token: Mutex<Option<String>>,
-    gateway: Mutex<GatewayClient>,
-    neck: Vec<String>
+    gateway: GatewayClient,
 }
 
 #[instrument]
@@ -77,44 +74,13 @@ async fn set_token(
     *state.token.lock().await = Some(token.clone());
 
     // Start Gateway connection
-    if let Err(e) = state.gateway.lock().await.connect(token, app_handle).await {
+    if let Err(e) = state.gateway.connect(token, app_handle).await {
         error!("Failed to start Gateway: {}", e);
     }
 
     info!("Token saved successfully");
     Ok(true)
 }
-
-#[tauri::command]
-async fn start_gateway(state: State<'_, AppState>, app_handle: AppHandle) -> Result<bool, String> {
-    let token = state
-        .token
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| "No token available".to_string())?;
-
-    state
-        .gateway
-        .lock()
-        .await
-        .connect(token, app_handle)
-        .await?;
-
-    Ok(true)
-}
-
-#[tauri::command]
-async fn stop_gateway(state: State<'_, AppState>) -> Result<(), ()> {
-    state.gateway.lock().await.disconnect().await;
-    Ok(())
-}
-
-#[tauri::command]
-async fn is_gateway_connected(state: State<'_, AppState>) -> Result<bool, ()> {
-    Ok(state.gateway.lock().await.is_connected().await)
-}
-
 #[tauri::command]
 #[instrument(skip(state))]
 async fn get_token(state: State<'_, AppState>) -> Result<String, ()> {
@@ -124,7 +90,6 @@ async fn get_token(state: State<'_, AppState>) -> Result<String, ()> {
         Err(())
     }
 }
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -145,15 +110,15 @@ pub fn run() {
             let token = tauri::async_runtime::block_on(load_validate_and_persist_token());
 
             // Initialize Gateway client
-            let gateway = Mutex::new(GatewayClient::new());
-            
+            let gateway = GatewayClient::new();
+
             // Auto-start Gateway if token exists
             if let Some(ref tok) = token {
                 let tok = tok.clone();
                 let app_handle = app.handle().clone();
                 let gateway = &gateway;
-                tauri::async_runtime::block_on(async move {  
-                    if let Err(e) = gateway.lock().await.connect(tok, app_handle).await {
+                tauri::async_runtime::block_on(async move {
+                    if let Err(e) = gateway.connect(tok, app_handle).await {
                         error!("Failed to auto-start Gateway: {}", e);
                     }
                 });
@@ -163,7 +128,6 @@ pub fn run() {
             app.manage(AppState {
                 token: Mutex::new(token),
                 gateway: gateway,
-                neck: vec![String::new(), String::new()]
             });
             Ok(())
         })
@@ -171,9 +135,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_token,
             set_token,
-            start_gateway,
-            stop_gateway,
-            is_gateway_connected,
             fetch_user_guilds,
             fetch_guild_channels,
             fetch_user_channels,
