@@ -11,7 +11,7 @@ pub use crate::messangers::discord::voice_gateway::VoiceGatewayClient;
 
 pub struct GatewayClient {
     pub event_gateway: Mutex<Option<EventGatewayClient>>,
-    pub voice_gateway: Mutex<VoiceGatewayClient>,
+    pub voice_gateway: Mutex<Option<VoiceGatewayClient>>,
     pub last_sequence: Mutex<Option<u64>>,
     pub user_id: Mutex<Option<String>>,
     pub session_id: Mutex<Option<String>>,
@@ -35,13 +35,22 @@ impl GatewayClient {
         let mut event = self.event_gateway.lock().await;
         *event = None;
     }
+
+    /// Drops the voice gateway client (by taking it out of the Option).
+    /// This triggers `Drop` on `VoiceGatewayClient`, which will best-effort close the socket.
+    pub async fn disconnect_voice(&self) {
+        let mut voice = self.voice_gateway.lock().await;
+        if voice.is_some(){
+            *voice = None;
+        }
+    }
 }
 
 impl Default for GatewayClient {
     fn default() -> Self {
         Self {
             event_gateway: Some(EventGatewayClient::new()).into(),
-            voice_gateway: VoiceGatewayClient::new().into(),
+            voice_gateway: Some(VoiceGatewayClient::new()).into(),
             last_sequence: Mutex::new(None).into(),
             user_id: Mutex::new(None).into(),
             session_id: Mutex::new(None).into(),
@@ -55,6 +64,8 @@ pub async fn voice_init(
     guild_id: String,
     channel_id: String,
 ) -> Result<(), String> {
+    let state = &state.gateway;
+      state.disconnect_voice().await; 
     let voice_payload = json!({
         "op": 4,  // VOICE_STATE_UPDATE opcode
         "d": {
@@ -65,7 +76,7 @@ pub async fn voice_init(
         }
     });
 
-    let mut gw_guard = state.gateway.event_gateway.lock().await;
+    let mut gw_guard = state.event_gateway.lock().await;
     let client = gw_guard
         .as_mut()
         .ok_or_else(|| "event gateway client not initialized".to_string())?;

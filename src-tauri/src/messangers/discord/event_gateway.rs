@@ -10,6 +10,7 @@ use tokio::{
     time::{Duration, interval},
 };
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 
@@ -232,7 +233,12 @@ async fn run_gateway(
                 let mut guard = state.gateway.event_gateway.lock().await;
                 let guard = guard.as_mut().unwrap();
                 let guard = guard.write_stream.as_mut().unwrap();
-                guard.send(Message::Close(None)).await;
+                let _ = guard
+                    .send(Message::Close(Some(CloseFrame {
+                        code: CloseCode::Normal,
+                        reason: std::borrow::Cow::Borrowed(""),
+                    })))
+                    .await;
             }
 
             // Send heartbeats
@@ -367,26 +373,13 @@ async fn handle_dispatch_event(
             debug!("TRYING TO CONNECT");
             if let Some(state) = state {
                 let server_id = data["guild_id"].as_str().unwrap().to_owned();
-
-                // Get user_id and session_id from GatewayClient
-                let (user_id, session_id) = {
-                    let user_id_guard = state.gateway.user_id.lock().await;
-                    let session_id_guard = state.gateway.session_id.lock().await;
-                    let user_id = user_id_guard.as_ref();
-                    let session_id = session_id_guard.as_ref();
-                    let user_id = user_id.unwrap().clone();
-                    let session_id = session_id.unwrap().clone();
-                    (user_id, session_id)
-                };
                 let token = data["token"].as_str().unwrap().to_owned();
                 let endpoint = data["endpoint"].as_str().unwrap().to_owned();
                 // Connect voice gateway
-                state
-                    .gateway
-                    .voice_gateway
-                    .lock()
-                    .await
-                    .connect(app_handle, server_id, user_id, session_id, token, endpoint)
+                let mut voice_guard = state.gateway.voice_gateway.lock().await;
+                let voice = voice_guard.get_or_insert_with(crate::messangers::discord::voice_gateway::VoiceGatewayClient::new);
+                voice
+                    .connect(app_handle, server_id, token, endpoint)
                     .await?;
             }
             Some(GatewayEvent::Connected)

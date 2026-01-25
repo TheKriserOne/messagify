@@ -4,13 +4,14 @@ use std::sync::Arc;
 use futures::{SinkExt, StreamExt, stream::SplitSink};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager, http::Request};
 use tokio::{
     net::UdpSocket,
-    sync::{Mutex, mpsc},
+    sync::mpsc,
     time::{Duration, interval},
 };
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 
@@ -52,45 +53,37 @@ pub struct VoiceSessionDescription {
 }
 
 pub struct VoiceGatewayClient {
-    shutdown_tx: Option<mpsc::Sender<()>>,
-    write_stream: Arc<
-        Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>,
-    >,
-    is_connected: Arc<Mutex<bool>>,
-    voice_token: Option<String>,
-    endpoint: Option<String>,
-    server_id: Option<String>
+    pub shutdown_tx: Option<mpsc::Sender<()>>,
+    pub write_stream:
+        Option<SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>,
+    pub is_connected: bool,
 }
 
 impl VoiceGatewayClient {
     pub fn new() -> Self {
         Self {
             shutdown_tx: None,
-            write_stream: Arc::new(Mutex::new(None)),
-            is_connected: Arc::new(Mutex::new(false)),
-            voice_token: None,
-            endpoint: None,
-            server_id: None,
+            write_stream: None,
+            is_connected: false,
         }
     }
 
     pub async fn is_connected(&self) -> bool {
-        *self.is_connected.lock().await
+        self.is_connected
     }
 
     pub async fn disconnect(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
         }
-        *self.is_connected.lock().await = false;
+        self.is_connected = false;
+        self.write_stream = None;
     }
 
     pub async fn connect(
         &mut self,
         app_handle: &AppHandle,
         server_id: String,
-        user_id: String,
-        session_id: String,
         token: String,
         endpoint: String,
     ) -> Result<(), String> {
@@ -102,29 +95,23 @@ impl VoiceGatewayClient {
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
 
-        let is_connected = self.is_connected.clone();
-        let write_stream = self.write_stream.clone();
         let app_handle = app_handle.clone();
         // Spawn the voice gateway connection task
         tokio::spawn(async move {
-            if let Err(e) = run_voice_gateway(
-                app_handle,
-                token,
-                user_id,
-                session_id,
-                server_id,
-                endpoint,
-                shutdown_rx,
-                is_connected,
-                write_stream,
-            )
-            .await
-            {
+            if let Err(e) = run_voice_gateway(app_handle, token, server_id, endpoint, shutdown_rx).await {
                 error!("Voice gateway error: {}", e);
             }
         });
 
         Ok(())
+    }
+}
+
+impl Drop for VoiceGatewayClient {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.try_send(());
+        }
     }
 }
 
@@ -138,29 +125,38 @@ impl Default for VoiceGatewayClient {
 /// Follows Discord's Voice Gateway protocol (v4)
 /// Documentation: https://discord.com/developers/docs/topics/voice-connections
 async fn run_voice_gateway(
-    _app_handle: AppHandle,
+    app_handle: AppHandle,
     token: String,
-    user_id: String,
-    session_id: String,
     guild_id: String,
     endpoint: String,
     mut shutdown_rx: mpsc::Receiver<()>,
-    is_connected: Arc<Mutex<bool>>,
-    write_stream: Arc<
-        Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>,
-    >,
 ) -> Result<(), String> {
     info!("Connecting to Discord Voice Gateway...");
 
-    let voice_url = format!("wss://{}/?v=7", endpoint);
+    // Pull user_id/session_id from the already-connected event gateway state
+    let state = app_handle.state::<crate::AppState>();
+    let user_id = state
+        .gateway
+        .user_id
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "voice gateway: missing user_id (not READY yet?)".to_string())?;
+    let session_id = state
+        .gateway
+        .session_id
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "voice gateway: missing session_id (not READY yet?)".to_string())?;
 
+    let voice_url = format!("wss://{}/?v=8", endpoint);
     let (ws_stream, _) = connect_async(&voice_url)
         .await
         .map_err(|e| format!("Voice WebSocket connection failed: {}", e))?;
 
     let (mut write, mut read) = ws_stream.split();
 
-    *is_connected.lock().await = true;
     info!("Connected to Discord Voice Gateway");
 
     let mut heartbeat_interval: Option<u64> = None;
@@ -176,6 +172,7 @@ async fn run_voice_gateway(
         match msg {
             Ok(Message::Text(text)) => {
                 if let Ok(payload) = serde_json::from_str::<VoiceGatewayPayload>(&text) {
+                    info!("{:?}", serde_json::from_str::<serde_json::Value>(&text));
                     if payload.op == VOICE_OP_HELLO {
                         if let Some(d) = payload.d {
                             heartbeat_interval = d["heartbeat_interval"].as_u64();
@@ -213,8 +210,9 @@ async fn run_voice_gateway(
         "d": {
             "server_id": guild_id,
             "user_id": user_id,
-            "session_id": session_id,
-            "token": token
+            "session_id": format!("{}", session_id),
+            "token": token,
+            "max_dave_protocol_version": 1
         }
     });
 
@@ -224,6 +222,14 @@ async fn run_voice_gateway(
         .map_err(|e| format!("Failed to send VOICE IDENTIFY: {}", e))?;
 
     info!("Sent VOICE IDENTIFY payload");
+
+    // Store write stream + mark connected in the shared state, like event_gateway.rs does.
+    if let Some(vg) = state.gateway.voice_gateway.lock().await.as_mut() {
+        vg.is_connected = true;
+        vg.write_stream = Some(write);
+    } else {
+        return Err("voice gateway client not initialized".to_string());
+    }
 
     // Step 3: Start heartbeat task
     // Heartbeats keep the connection alive (opcode 3)
@@ -242,7 +248,10 @@ async fn run_voice_gateway(
                 .unwrap_or(0);
             let heartbeat = json!({
                 "op": VOICE_OP_HEARTBEAT,
-                "d": nonce
+                "d": {
+                    "t": nonce,
+                    "seq_ack": null
+                }
             });
             if heartbeat_tx.send(heartbeat).await.is_err() {
                 break;
@@ -250,36 +259,44 @@ async fn run_voice_gateway(
         }
     });
 
-    // Store write stream for use in the loop
-    {
-        let mut lock = write_stream.lock().await;
-        *lock = Some(write);
-    }
-
     // Main event loop
     loop {
         tokio::select! {
             // Check for shutdown signal
             Some(_) = shutdown_rx.recv() => {
                 info!("Voice gateway shutdown requested");
-                let mut guard = write_stream.lock().await;
-                if let Some(write) = guard.as_mut() {
-                    let _ = write.send(Message::Close(None)).await;
+                let mut guard = state.gateway.voice_gateway.lock().await;
+                if let Some(vg) = guard.as_mut() {
+                    if let Some(ws) = vg.write_stream.as_mut() {
+                        let _ = ws
+                            .send(Message::Close(Some(CloseFrame {
+                                code: CloseCode::Normal,
+                                reason: std::borrow::Cow::Borrowed(""),
+                            })))
+                            .await;
+                    }
                 }
                 break;
             }
 
             // Send heartbeats (opcode 3)
             Some(heartbeat) = heartbeat_rx.recv() => {
-                let mut guard = write_stream.lock().await;
-                if let Some(write) = guard.as_mut() {
-                    if let Err(e) = write.send(Message::Text(heartbeat.to_string().into())).await {
-                        error!("Failed to send voice heartbeat: {}", e);
+                let mut guard = state.gateway.voice_gateway.lock().await;
+                if let Some(vg) = guard.as_mut() {
+                    if let Some(ws) = vg.write_stream.as_mut() {
+                        if let Err(e) = ws.send(Message::Text(heartbeat.to_string().into())).await {
+                            error!("Failed to send voice heartbeat: {}", e);
+                            break;
+                        }
+                    } else {
                         break;
                     }
+                } else {
+                    break;
                 }
                 debug!("Sent voice heartbeat");
             }
+
 
             // Read messages from the voice gateway
             msg = read.next() => {
@@ -287,7 +304,7 @@ async fn run_voice_gateway(
                     Some(Ok(Message::Text(text))) => {
                         if let Err(e) = handle_voice_message(
                             &text,
-                            &write_stream,
+                            &app_handle,
                             &mut ssrc,
                             &mut ip,
                             &mut port,
@@ -316,7 +333,11 @@ async fn run_voice_gateway(
         }
     }
 
-    *is_connected.lock().await = false;
+    // Mark disconnected / clear write_stream in shared state (like event_gateway.rs does).
+    if let Some(vg) = state.gateway.voice_gateway.lock().await.as_mut() {
+        vg.is_connected = false;
+        vg.write_stream = None;
+    }
     info!("Voice gateway disconnected");
 
     Ok(())
@@ -324,9 +345,7 @@ async fn run_voice_gateway(
 
 async fn handle_voice_message(
     text: &str,
-    write_stream: &Arc<
-        Mutex<Option<SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>,
-    >,
+    app_handle: &AppHandle,
     ssrc: &mut Option<u32>,
     ip: &mut Option<String>,
     port: &mut Option<u16>,
@@ -335,7 +354,7 @@ async fn handle_voice_message(
 ) -> Result<(), String> {
     let payload: VoiceGatewayPayload =
         serde_json::from_str(text).map_err(|e| format!("Failed to parse voice payload: {}", e))?;
-
+        info!("{}", serde_json::from_str::<serde_json::Value>(&text).unwrap());
     match payload.op {
         VOICE_OP_READY => {
             // Step 4: Receive READY (opcode 2) with SSRC, IP, port, and encryption modes
@@ -374,16 +393,19 @@ async fn handle_voice_message(
                     }
                 });
 
-                let mut guard = write_stream.lock().await;
-                if let Some(write) = guard.as_mut() {
-                    write
-                        .send(Message::Text(select_protocol.to_string().into()))
-                        .await
-                        .map_err(|e| format!("Failed to send SELECT_PROTOCOL: {}", e))?;
-                    info!("Sent SELECT_PROTOCOL with mode: {}", mode);
-                } else {
-                    return Err("Write stream not available".to_string());
-                }
+                let state = app_handle.state::<crate::AppState>();
+                let mut guard = state.gateway.voice_gateway.lock().await;
+                let vg = guard
+                    .as_mut()
+                    .ok_or_else(|| "voice gateway client not initialized".to_string())?;
+                let ws = vg
+                    .write_stream
+                    .as_mut()
+                    .ok_or_else(|| "voice gateway write_stream not available".to_string())?;
+                ws.send(Message::Text(select_protocol.to_string().into()))
+                    .await
+                    .map_err(|e| format!("Failed to send SELECT_PROTOCOL: {}", e))?;
+                info!("Sent SELECT_PROTOCOL with mode: {}", mode);
             }
         }
 
