@@ -1,12 +1,7 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-
 use futures::{SinkExt, StreamExt, stream::SplitSink};
-use serde::Deserialize;
 use serde_json::{Value, json};
-use tauri::{AppHandle, Manager, http::Request};
+use tauri::{AppHandle, Manager};
 use tokio::{
-    net::UdpSocket,
     sync::mpsc,
     time::{Duration, interval},
 };
@@ -14,6 +9,8 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
+
+use crate::messangers::discord::udp_socket::{UdpConnection, establish_udp_connection};
 
 // Voice Gateway opcodes
 pub const VOICE_OP_IDENTIFY: u8 = 0;
@@ -30,33 +27,38 @@ pub const VOICE_OP_RESUMED: u8 = 9;
 pub const VOICE_OP_CLIENT_CONNECT: u8 = 12;
 pub const VOICE_OP_CLIENT_DISCONNECT: u8 = 13;
 
-// Voice Gateway payload structures
-#[derive(Debug, Deserialize)]
-pub struct VoiceGatewayPayload {
-    pub op: u8,
-    pub d: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VoiceReadyData {
-    pub ssrc: u32,
-    pub ip: String,
-    pub port: u16,
-    pub modes: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct VoiceSessionDescription {
-    pub mode: String,
-    #[serde(rename = "secret_key")]
-    pub secret_key: Vec<u8>,
-}
-
 pub struct VoiceGatewayClient {
     pub shutdown_tx: Option<mpsc::Sender<()>>,
     pub write_stream:
         Option<SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>,
     pub is_connected: bool,
+    pub udp: Option<UdpConnection>,
+    pub seq: Option<u64>
+}
+
+pub struct VoiceSession {
+    pub ssrc: Option<u32>,
+    pub ip: Option<String>,
+    pub port: Option<u16>,
+    pub secret_key: Option<Vec<u8>>,
+}
+
+impl VoiceSession {
+    pub fn new() -> Self {
+        Self {
+            ssrc: None,
+            ip: None,
+            port: None,
+            secret_key: None,
+        }
+    }
+
+    pub fn is_ready_for_udp(&self) -> bool {
+        self.ssrc.is_some()
+            && self.ip.is_some()
+            && self.port.is_some()
+            && self.secret_key.is_some()
+    }
 }
 
 impl VoiceGatewayClient {
@@ -65,6 +67,8 @@ impl VoiceGatewayClient {
             shutdown_tx: None,
             write_stream: None,
             is_connected: false,
+            udp: None,
+            seq: None
         }
     }
 
@@ -78,6 +82,7 @@ impl VoiceGatewayClient {
         }
         self.is_connected = false;
         self.write_stream = None;
+        self.udp = None;
     }
 
     pub async fn connect(
@@ -160,33 +165,30 @@ async fn run_voice_gateway(
     info!("Connected to Discord Voice Gateway");
 
     let mut heartbeat_interval: Option<u64> = None;
-    let mut ssrc: Option<u32> = None;
-    let mut ip: Option<String> = None;
-    let mut port: Option<u16> = None;
-    let mut secret_key: Option<Vec<u8>> = None;
-    let mut udp_socket: Option<Arc<UdpSocket>> = None;
+    let mut session = VoiceSession::new();
 
     // Step 1: Read HELLO message (opcode 8)
     // The server sends this immediately after connection with heartbeat_interval
     if let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Ok(payload) = serde_json::from_str::<VoiceGatewayPayload>(&text) {
-                    info!("{:?}", serde_json::from_str::<serde_json::Value>(&text));
-                    if payload.op == VOICE_OP_HELLO {
-                        if let Some(d) = payload.d {
-                            heartbeat_interval = d["heartbeat_interval"].as_u64();
-                            info!(
-                                "Received VOICE HELLO, heartbeat_interval: {:?} ms",
-                                heartbeat_interval
-                            );
-                        }
-                    } else {
-                        return Err(format!(
-                            "Expected HELLO (opcode 8), got opcode {}",
-                            payload.op
-                        ));
-                    }
+                let payload: Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("Failed to parse voice payload: {}", e))?;
+                debug!("{:?}", payload);
+                let op = payload["op"]
+                    .as_u64()
+                    .ok_or_else(|| "VOICE HELLO missing op".to_string())? as u8;
+                if op == VOICE_OP_HELLO {
+                    heartbeat_interval = payload["d"]["heartbeat_interval"].as_u64();
+                    info!(
+                        "Received VOICE HELLO, heartbeat_interval: {:?} ms",
+                        heartbeat_interval
+                    );
+                } else {
+                    return Err(format!(
+                        "Expected HELLO (opcode 8), got opcode {}",
+                        op
+                    ));
                 }
             }
             Ok(Message::Close(_)) => {
@@ -250,6 +252,7 @@ async fn run_voice_gateway(
                 "op": VOICE_OP_HEARTBEAT,
                 "d": {
                     "t": nonce,
+                    //TODO
                     "seq_ack": null
                 }
             });
@@ -305,11 +308,7 @@ async fn run_voice_gateway(
                         if let Err(e) = handle_voice_message(
                             &text,
                             &app_handle,
-                            &mut ssrc,
-                            &mut ip,
-                            &mut port,
-                            &mut secret_key,
-                            &mut udp_socket,
+                            &mut session,
                         ).await {
                             error!("Error handling voice message: {}", e);
                             break;
@@ -337,6 +336,7 @@ async fn run_voice_gateway(
     if let Some(vg) = state.gateway.voice_gateway.lock().await.as_mut() {
         vg.is_connected = false;
         vg.write_stream = None;
+        vg.udp = None;
     }
     info!("Voice gateway disconnected");
 
@@ -346,37 +346,48 @@ async fn run_voice_gateway(
 async fn handle_voice_message(
     text: &str,
     app_handle: &AppHandle,
-    ssrc: &mut Option<u32>,
-    ip: &mut Option<String>,
-    port: &mut Option<u16>,
-    secret_key: &mut Option<Vec<u8>>,
-    udp_socket: &mut Option<Arc<UdpSocket>>,
+    session: &mut VoiceSession,
 ) -> Result<(), String> {
-    let payload: VoiceGatewayPayload =
+    let payload: Value =
         serde_json::from_str(text).map_err(|e| format!("Failed to parse voice payload: {}", e))?;
-        info!("{}", serde_json::from_str::<serde_json::Value>(&text).unwrap());
-    match payload.op {
+    info!("{}", payload);
+    let op = payload["op"]
+        .as_u64()
+        .ok_or_else(|| "Voice payload missing op".to_string())? as u8;
+    match op {
         VOICE_OP_READY => {
             // Step 4: Receive READY (opcode 2) with SSRC, IP, port, and encryption modes
-            if let Some(d) = payload.d {
-                let ready_data: VoiceReadyData = serde_json::from_value(d.clone())
-                    .map_err(|e| format!("Failed to parse VOICE READY: {}", e))?;
+            if let Some(d) = payload.get("d").cloned() {
+                let ssrc = d["ssrc"]
+                    .as_u64()
+                    .ok_or_else(|| "VOICE READY missing ssrc".to_string())? as u32;
+                let ip = d["ip"]
+                    .as_str()
+                    .ok_or_else(|| "VOICE READY missing ip".to_string())?
+                    .to_string();
+                let port = d["port"]
+                    .as_u64()
+                    .ok_or_else(|| "VOICE READY missing port".to_string())? as u16;
+                let modes = d["modes"]
+                    .as_array()
+                    .ok_or_else(|| "VOICE READY missing modes".to_string())?;
 
-                *ssrc = Some(ready_data.ssrc);
-                *ip = Some(ready_data.ip.clone());
-                *port = Some(ready_data.port);
+                session.ssrc = Some(ssrc);
+                session.ip = Some(ip.clone());
+                session.port = Some(port);
 
                 info!(
                     "VOICE READY: ssrc={}, ip={}, port={}, modes={:?}",
-                    ready_data.ssrc, ready_data.ip, ready_data.port, ready_data.modes
+                    ssrc, ip, port, modes
                 );
 
-                // Find a supported encryption mode (prefer xsalsa20_poly1305)
-                let mode = ready_data
-                    .modes
+                let mode = modes
                     .iter()
-                    .find(|m| *m == "xsalsa20_poly1305")
-                    .or_else(|| ready_data.modes.first())
+                    .find_map(|m| match m.as_str() {
+                        Some("aead_xchacha20_poly1305_rtpsize") => Some("aead_xchacha20_poly1305_rtpsize"),
+                        _ => None,
+                    })
+                    .or_else(|| modes.iter().find_map(|m| m.as_str()))
                     .ok_or_else(|| "No supported encryption mode".to_string())?;
 
                 // Step 5: Send SELECT_PROTOCOL (opcode 1)
@@ -386,8 +397,8 @@ async fn handle_voice_message(
                     "d": {
                         "protocol": "udp",
                         "data": {
-                            "address": ready_data.ip,
-                            "port": ready_data.port,
+                            "address": ip,
+                            "port": port,
                             "mode": mode
                         }
                     }
@@ -411,33 +422,55 @@ async fn handle_voice_message(
 
         VOICE_OP_SESSION_DESCRIPTION => {
             // Step 6: Receive SESSION_DESCRIPTION (opcode 4) with encryption secret key
-            if let Some(d) = payload.d {
-                let session: VoiceSessionDescription = serde_json::from_value(d.clone())
-                    .map_err(|e| format!("Failed to parse SESSION_DESCRIPTION: {}", e))?;
+            if let Some(d) = payload.get("d").cloned() {
+                let secret_key_values = d["secret_key"]
+                    .as_array()
+                    .ok_or_else(|| "SESSION_DESCRIPTION missing secret_key".to_string())?;
+                let secret_key: Vec<u8> = secret_key_values
+                    .iter()
+                    .map(|v| {
+                        v.as_u64()
+                            .ok_or_else(|| "Invalid secret_key entry".to_string())
+                            .map(|b| b as u8)
+                    })
+                    .collect::<Result<Vec<u8>, String>>()?;
+                let mode = d["mode"]
+                    .as_str()
+                    .ok_or_else(|| "SESSION_DESCRIPTION missing mode".to_string())?;
 
-                *secret_key = Some(session.secret_key.clone());
+                session.secret_key = Some(secret_key.clone());
 
                 info!(
                     "Received SESSION_DESCRIPTION, mode: {}, key length: {}",
-                    session.mode,
-                    session.secret_key.len()
+                    mode,
+                    secret_key.len()
                 );
 
                 // Now we can establish UDP connection for audio transport
-                if let (Some(ssrc_val), Some(ip_val), Some(port_val), Some(key)) = (
-                    ssrc.as_ref(),
-                    ip.as_ref(),
-                    port.as_ref(),
-                    secret_key.as_ref(),
-                ) {
-                    if let Err(e) =
-                        establish_udp_connection(*ssrc_val, ip_val, *port_val, key, udp_socket)
-                            .await
-                    {
-                        error!("Failed to establish UDP connection: {}", e);
-                    } else {
-                        info!("Voice connection fully established and ready for audio");
-                    }
+                if session.is_ready_for_udp() {
+                    let ssrc = session
+                        .ssrc
+                        .ok_or_else(|| "UDP connect missing ssrc".to_string())?;
+                    let ip = session
+                        .ip
+                        .as_ref()
+                        .ok_or_else(|| "UDP connect missing ip".to_string())?;
+                    let port = session
+                        .port
+                        .ok_or_else(|| "UDP connect missing port".to_string())?;
+                    let secret_key = session
+                        .secret_key
+                        .as_ref()
+                        .ok_or_else(|| "UDP connect missing secret_key".to_string())?;
+
+                    let udp = establish_udp_connection(ssrc, ip, port, secret_key).await?;
+                    let state = app_handle.state::<crate::AppState>();
+                    let mut guard = state.gateway.voice_gateway.lock().await;
+                    let vg = guard
+                        .as_mut()
+                        .ok_or_else(|| "voice gateway client not initialized".to_string())?;
+                    vg.udp = Some(udp);
+                    info!("Voice connection fully established and ready for audio");
                 }
             }
         }
@@ -462,7 +495,6 @@ async fn handle_voice_message(
         VOICE_OP_CLIENT_DISCONNECT => {
             debug!("Client disconnected from voice channel");
         }
-
         _ => {
             debug!("Received voice opcode: {:?}", payload);
         }
@@ -471,68 +503,3 @@ async fn handle_voice_message(
     Ok(())
 }
 
-async fn establish_udp_connection(
-    ssrc: u32,
-    ip: &str,
-    port: u16,
-    secret_key: &[u8],
-    udp_socket: &mut Option<Arc<UdpSocket>>,
-) -> Result<(), String> {
-    info!("Establishing UDP connection to {}:{}", ip, port);
-
-    // Create UDP socket bound to any available port
-    let local_addr = "0.0.0.0:0";
-    let socket = UdpSocket::bind(local_addr)
-        .await
-        .map_err(|e| format!("Failed to bind UDP socket: {}", e))?;
-
-    let remote_addr: SocketAddr = format!("{}:{}", ip, port)
-        .parse()
-        .map_err(|e| format!("Invalid remote address: {}", e))?;
-
-    // Send IP discovery packet (70 bytes)
-    // Format: [type: 2 bytes][length: 2 bytes][SSRC: 4 bytes][padding: 62 bytes]
-    let mut discovery_packet = vec![0u8; 70];
-    discovery_packet[0] = 0x01; // Type: request
-    discovery_packet[1] = 0x00; // Length (high byte)
-    discovery_packet[2] = 0x46; // Length (low byte) = 70
-    discovery_packet[3] = 0x00;
-    // SSRC in bytes 4-7 (big endian)
-    discovery_packet[4] = ((ssrc >> 24) & 0xFF) as u8;
-    discovery_packet[5] = ((ssrc >> 16) & 0xFF) as u8;
-    discovery_packet[6] = ((ssrc >> 8) & 0xFF) as u8;
-    discovery_packet[7] = (ssrc & 0xFF) as u8;
-
-    socket
-        .send_to(&discovery_packet, &remote_addr)
-        .await
-        .map_err(|e| format!("Failed to send discovery packet: {}", e))?;
-
-    info!("Sent UDP IP discovery packet");
-
-    // Receive IP discovery response
-    let mut buffer = [0u8; 70];
-    let (size, _) = socket
-        .recv_from(&mut buffer)
-        .await
-        .map_err(|e| format!("Failed to receive IP discovery: {}", e))?;
-
-    if size < 70 {
-        return Err("Invalid IP discovery response".to_string());
-    }
-
-    // Extract our external IP from the response (bytes 4-7 are our IP)
-    let our_ip = format!("{}.{}.{}.{}", buffer[4], buffer[5], buffer[6], buffer[7]);
-    // Extract our port from the response (bytes 58-59)
-    let our_port = u16::from_be_bytes([buffer[58], buffer[59]]);
-
-    info!(
-        "UDP connection established. External IP: {}, Port: {}",
-        our_ip, our_port
-    );
-    info!("Secret key length: {} bytes", secret_key.len());
-
-    *udp_socket = Some(Arc::new(socket));
-
-    Ok(())
-}

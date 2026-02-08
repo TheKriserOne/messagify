@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use flate2::read::ZlibDecoder;
 use futures::{SinkExt, StreamExt, stream::SplitSink};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseC
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, error, info, warn};
 
-use crate::AppState;
+use crate::{AppState, messangers::discord::gateway::VoiceGatewayClient};
 
 pub const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 
@@ -28,14 +28,6 @@ pub const OP_RECONNECT: u8 = 7;
 pub const OP_INVALID_SESSION: u8 = 9;
 pub const OP_HELLO: u8 = 10;
 pub const OP_HEARTBEAT_ACK: u8 = 11;
-
-#[derive(Debug, Deserialize)]
-pub struct GatewayPayload {
-    pub op: u8,
-    pub d: Option<Value>,
-    pub s: Option<u64>,
-    pub t: Option<String>,
-}
 
 // Identify payload structs - kept for documentation, using json! macro instead
 #[allow(dead_code)]
@@ -139,16 +131,17 @@ async fn run_gateway(
     if let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Ok(payload) = serde_json::from_str::<GatewayPayload>(&text) {
-                    if payload.op == OP_HELLO {
-                        if let Some(d) = payload.d {
-                            heartbeat_interval = d["heartbeat_interval"].as_u64();
-                            info!(
-                                "Received HELLO, heartbeat_interval: {:?} ms",
-                                heartbeat_interval
-                            );
-                        }
-                    }
+                let payload: Value = serde_json::from_str(&text)
+                    .map_err(|e| format!("Failed to parse payload: {}", e))?;
+                let op = payload["op"]
+                    .as_u64()
+                    .ok_or_else(|| "HELLO missing op".to_string())? as u8;
+                if op == OP_HELLO {
+                    heartbeat_interval = payload["d"]["heartbeat_interval"].as_u64();
+                    info!(
+                        "Received HELLO, heartbeat_interval: {:?} ms",
+                        heartbeat_interval
+                    );
                 }
             }
             Ok(Message::Close(_)) => {
@@ -180,7 +173,6 @@ async fn run_gateway(
         }
     });
 
-    
     if let Some(state) = state.gateway.event_gateway.lock().await.as_mut() {
         write
             .send(Message::Text(identify.to_string().into()))
@@ -246,7 +238,9 @@ async fn run_gateway(
                 let mut guard = state.gateway.event_gateway.lock().await;
                 let guard = guard.as_mut().unwrap();
                 let guard = guard.write_stream.as_mut().unwrap();
-                guard.send(Message::Text(heartbeat.to_string().into())).await;
+                if let Err(e) = guard.send(Message::Text(heartbeat.to_string().into())).await {
+                    error!("Failed to send heartbeat: {}", e);
+                }
                 debug!("Sent heartbeat");
             }
 
@@ -298,16 +292,21 @@ async fn handle_message(
     app_handle: &AppHandle,
     heartbeat_ack: &Arc<Mutex<bool>>,
 ) -> Result<(), String> {
-    let payload: GatewayPayload =
+    let payload: Value =
         serde_json::from_str(text).map_err(|e| format!("Failed to parse payload: {}", e))?;
+    let op = payload["op"]
+        .as_u64()
+        .ok_or_else(|| "Payload missing op".to_string())? as u8;
     // Update sequence number
-    if let Some(s) = payload.s {
+    if let Some(s) = payload["s"].as_u64() {
         let state = app_handle.state::<AppState>();
         *state.gateway.last_sequence.lock().await = Some(s);
     }
-    match payload.op {
+    match op {
         OP_DISPATCH => {
-            if let (Some(event_type), Some(data)) = (payload.t.as_deref(), payload.d) {
+            let event_type = payload["t"].as_str();
+            let data = payload.get("d").cloned();
+            if let (Some(event_type), Some(data)) = (event_type, data) {
                 handle_dispatch_event(event_type, data, app_handle).await?;
             }
         }
@@ -328,7 +327,7 @@ async fn handle_message(
             return Err("Invalid session".to_string());
         }
         _ => {
-            debug!("Received opcode: {}", payload.op);
+            debug!("Received opcode: {}", op);
         }
     }
 
@@ -377,7 +376,7 @@ async fn handle_dispatch_event(
                 let endpoint = data["endpoint"].as_str().unwrap().to_owned();
                 // Connect voice gateway
                 let mut voice_guard = state.gateway.voice_gateway.lock().await;
-                let voice = voice_guard.get_or_insert_with(crate::messangers::discord::voice_gateway::VoiceGatewayClient::new);
+                let voice = voice_guard.get_or_insert_with(VoiceGatewayClient::new);
                 voice
                     .connect(app_handle, server_id, token, endpoint)
                     .await?;
