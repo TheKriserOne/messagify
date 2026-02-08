@@ -65,9 +65,9 @@ npm run tauri build
 
 The app stores a Discord token in `tokens.json` at the project root (outside `src-tauri` to avoid rebuilds). On startup, the token is loaded and validated; if it’s invalid, it’s cleared. This file is git‑ignored, but treat it like a secret.
 
-## Voice (WIP)
+## Voice
 
-Voice work lives in `src-tauri/src/messangers/discord/voice_gateway.rs` and `udp_socket.rs`. The gateway handshake is implemented, with UDP discovery in place, but audio transport is still in progress.
+Voice work lives in `src-tauri/src/messangers/discord/voice_gateway.rs` and `udp_socket.rs`. The gateway handshake is implemented, with UDP discovery in place implementing Discord's WebRTC
 
 ## Troubleshooting
 
